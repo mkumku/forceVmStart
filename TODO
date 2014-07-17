@@ -1,0 +1,17 @@
+To make it working with 3.4
+===========================
+1) What are the fields to be used in cmd when we start the VM?
+- Check if the current filds still exist in the ovf
+- Check the fields sent in livbirt.xml by vdsm
+2) Change the parsing process. Can we make it more generic?
+3) Confirm Vm is actually starting.
+4) Seems like even if vm is running currently, the tool ignores it
+
+Future Features list:
+=====================
+- Make the tool compatible with 3.5 vdsm
+  https://bugzilla.redhat.com/show_bug.cgi?id=1043440
+- Check all the hosts in the cluster, and if some are unaccessible - add warning and do not proceed, until a flag --force is added
+- Check it is working with hosted engine
+- Add connection timeout
+

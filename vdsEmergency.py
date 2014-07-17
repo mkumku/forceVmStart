@@ -304,9 +304,11 @@ class vdsmEmergency:
 
             # Getting vmName field
             for node in dom.getElementsByTagName('Content'):
-                if node.childNodes[0].firstChild <> None:
-                    self.vmName = node.childNodes[0].firstChild.nodeValue
+                # orig code: if node.childNodes[0].firstChild <> None:
+                if node.getElementsByTagName('Name')[0].firstChild <> None:
+                    self.vmName = node.getElementsByTagName('Name')[0].firstChild.nodeValue
                     cmd['vmName'] = self.vmName
+                    #print 'self.vmName = %s' % self.vmName
 
             # Getting image and volume
             i = 0
@@ -402,6 +404,7 @@ class vdsmEmergency:
                         while (i <> len(checkvms)):
                             if self.vmName == checkvms[i]:
                                 nrmVms = nrmVms + 1
+				#import pdb; pdb.set_trace()
                                 self.startVM(cmd, destHostStart)
                             i += 1
 
@@ -437,6 +440,8 @@ if __name__ == "__main__":
     otherHostsList = ''
     VmsToStart = None
     destHostStart = None
+    
+    #import pdb; pdb.set_trace()
 
     VE = vdsmEmergency()
     try:

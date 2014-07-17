@@ -12,9 +12,12 @@
 # - Douglas Landgraf (dougsland@redhat.com)
 #
 # Contributors:
+# - Marina Kalinin (marinamku@gmail.com)
 # - Vladik Romanovsky (vladik.romanovsky@gmail.com)
 # - Pablo Iranzo Gomez (Pablo.Iranzo@redhat.com)
 #
+# Available in repository:
+# https://github.com/mkumku/forceVmStart
 
 ###############################################################################
 ##############                       WARNING                     ##############
@@ -363,7 +366,7 @@ class vdsmEmergency:
                         cmd['drives'] = drives
 
                 # Getting bridge
-                nicMod = None
+                nicMod = "pv"
                 if node.childNodes[0].firstChild.nodeValue == "Ethernet adapter on rhevm":
                     if node.childNodes[3].firstChild.nodeValue == "3":
                         nicMod = "pv" #VirtIO

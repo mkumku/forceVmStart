@@ -296,6 +296,7 @@ class vdsmEmergency:
             # Getting vmId field
             i = 0
             attr = 0
+            self.isTmplt = False
             for node in dom.getElementsByTagName('Section'):
                 while (i < len(node.attributes)):
                     attr = node.attributes.items()
@@ -320,16 +321,18 @@ class vdsmEmergency:
                         cmd['display'] = 'qxl' if node.getElementsByTagName('DefaultDisplayType')[0].firstChild.data == '1' else 'vnc'
                         print cmd['display']
                 else: 
+                    self.isTmplt = True
                     print 'Template has no display value'
    
 
 
-            import pdb; pdb.set_trace()
             # Getting image and volume
-            # mku this section does not work
+            # I do not think it will work for multiple disks here. maybe everything underneath under the for loop
             i = 0
             attr = 0
             for node in dom.getElementsByTagName('Disk'):
+#                import pdb; pdb.set_trace()
+#                i = 0
                 while (i <> len(node.attributes)):
                     attr = node.attributes.items()
                     if attr[i][0] == "ovf:fileRef":
@@ -337,9 +340,12 @@ class vdsmEmergency:
                         data = storage.split("/")
                         image = data[0]
                         volume = data[1]
+                        print data
+                        break 
                     i += 1
 
             # Getting VM format, boot
+            # mku: I do not like this part either:  how do we know we got into same Disk??
             i = 0
             attr = 0
             for node in dom.getElementsByTagName('Disk'):
@@ -361,78 +367,87 @@ class vdsmEmergency:
             elif format == "RAW":
                 vmFormat = ":raw"
 
-
             if ifFormat == "VirtIO":
                 ifDisk = "virtio"
             elif ifFormat == "IDE":
                 ifDisk = "ide"
+
             drives = []
             # Getting Drive, bridge, memSize, macAddr, smp, smpCoresPerSocket
             for node in dom.getElementsByTagName('Item'):
+#                import pdb; pdb.set_trace()
+
                 # Getting Drive
-                if node.childNodes[0].firstChild <> None:
-                    str = node.childNodes[0].firstChild.nodeValue
-                    if str.find("Drive") > -1:
-                        tmp = "pool:" + self.spUUID + ",domain:" + node.childNodes[7].firstChild.nodeValue + ",image:" + image + ",volume:" + volume + ",boot:" + vmBoot + ",format" + vmFormat + ",if:" + ifDisk
-                        #param,value = tmp.split("=",1)
-                        drives += [self._parseDriveSpec(tmp)]
-                        cmd['drives'] = drives
+		if volume == node.getElementsByTagName('rasd:InstanceId')[0].firstChild.data:
+                    domain = node.getElementsByTagName('rasd:StorageId')[0].firstChild.data 
+                    pool = node.getElementsByTagName('rasd:StoragePoolId')[0].firstChild.data
+                    tmp = "pool:" + pool + ",domain:" + domain + ",image:" + image + ",volume:" + volume + ",boot:" + vmBoot + ",format" + vmFormat + ",if:" + ifDisk
+                    #param,value = tmp.split("=",1)
+                    drives += [self._parseDriveSpec(tmp)]
+                    cmd['drives'] = drives
+                    print drives
+                    continue
+
+
 
                 # Getting bridge
                 nicMod = "pv"
-                if node.childNodes[0].firstChild.nodeValue == "Ethernet adapter on rhevm":
-                    if node.childNodes[3].firstChild.nodeValue == "3":
+                if "Ethernet adapter on rhevm" == node.getElementsByTagName('rasd:Caption')[0].firstChild.data:
+                    nicSubType = node.getElementsByTagName('rasd:ResourceSubType')[0].firstChild.data
+                    if nicSubType == "3":
                         nicMod = "pv" #VirtIO
-                    elif node.childNodes[3].firstChild.nodeValue == "2":
+                    elif nicSubType == "2":
                         nicMod = "e1000" #e1000
-                    elif node.childNodes[3].firstChild.nodeValue == "1":
+                    elif nicSubType == "1":
                         nicMod = "rtl8139" #rtl8139
 
                     cmd['nicModel'] = nicMod
-                    cmd['bridge'] = node.childNodes[4].firstChild.nodeValue
+                    cmd['bridge'] = node.getElementsByTagName('rasd:Connection')[0].firstChild.data 
+                    print 'bridge: %s' % cmd['bridge']
+                    
+                    if not self.isTmplt and node.getElementsByTagName('rasd:MACAddress')[0].firstChild <> None: 
+                        cmd['macAddr'] = node.getElementsByTagName('rasd:MACAddress')[0].firstChild.data
+                        print 'macAddr: %s' % cmd['macAddr']
 
                 # Getting memSize field
-                str = node.childNodes[0].firstChild.nodeValue
+                str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("MB of memory") > -1:
-                    cmd['memSize'] = node.childNodes[5].firstChild.nodeValue
+                    cmd['memSize'] = node.getElementsByTagName('rasd:VirtualQuantity')[0].firstChild.data
+                    print 'memSize: %s' % cmd['memSize']
 
                 # Getting smp and smpCoresPerSocket fields
-                str = node.childNodes[0].firstChild.nodeValue
+                str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("virtual cpu") > -1:
-                    cmd["smp="] = node.childNodes[4].firstChild.nodeValue
-                    cmd["smpCoresPerSocket"] = node.childNodes[5].firstChild.nodeValue
+                    cmd["smp"] = node.getElementsByTagName('rasd:num_of_sockets')[0].firstChild.data
+                    cmd["smpCoresPerSocket"] = node.getElementsByTagName('rasd:cpu_per_socket')[0].firstChild.data
+                    print 'num_of_socket: %s' %cmd['smp']
+                    print 'core_per_socket: %s' % cmd['smpCoresPerSocket']
 
-                # Getting macAddr field
-                if node.childNodes[0].firstChild.nodeValue == "Ethernet adapter on rhevm":
-                    if len(node.childNodes) > 6:
-                        cmd['macAddr'] = node.childNodes[6].firstChild.nodeValue
 
-                    # if node.childNodes < 6 it`s a template entry, so ignore
-                    if len(node.childNodes) > 6:
-                        # print only vms to start
-                        try:
-                            checkvms = VmsToStart.split(",")
-                        except:
-                            print "Please use , between vms name, avoid space"
-                            self.usage()
+            if not self.isTmplt:
+                # print only vms to start
+                try:
+                    checkvms = VmsToStart.split(",")
+                except:
+                    print "Please use , between vms name, avoid space"
+                    self.usage()
 
-                        i = 0
-                        while (i <> len(checkvms)):
-                            if self.vmName == checkvms[i]:
-                                nrmVms = nrmVms + 1
-				#import pdb; pdb.set_trace()
-                                #self.startVM(cmd, destHostStart)
-                                print "Debug mode. Not starting VM. Printing cmd:"
-                                print cmd
-                            i += 1
+                i = 0
+                while (i <> len(checkvms)):
+                    print 'current vmName: %s' % self.vmName
+                    print 'checkVms: %s' % checkvms
+                    if self.vmName == checkvms[i]:
+                        nrmVms = nrmVms + 1
+                        self.startVM(cmd, destHostStart)
+                        print "Debug mode. Not starting VM. Printing cmd:"
+                        print cmd
+                        break
+                    i += 1
 
         print "Total VMs found: %s" % nrmVms
 
     def startVM(self, cmd, destHostStart):
         """start the VM"""
-
-        #cmd = {'acpiEnable': 'true', 'emulatedMachine': 'rhel6.5.0', 'vmId': '79f4a348-a928-45c4-85c6-b6bfc600d507', 'memGuaranteedSize': 1024, 'spiceSslCipherSuite': 'DEFAULT', 'timeOffset': '0', 'cpuType': 'Penryn', 'custom': {'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5device_ebe2ce74-5668-4c44-9099-21f5c8d690ccdevice_00f0e2b7-5893-45fb-a13e-c3389e6a7dbd': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=00f0e2b7-5893-45fb-a13e-c3389e6a7dbd, device=spicevmc, type=CHANNEL, bootOrder=0, specParams={}, address={port=3, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel2, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eab': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eab, device=virtio-serial, type=CONTROLLER, bootOrder=0, specParams={}, address={bus=0x00, domain=0x0000, type=pci, slot=0x05, function=0x0}, managed=false, plugged=true, readOnly=false, deviceAlias=virtio-serial0, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=ba80ae13-a054-4d4a-9c68-0df32d6540c5, device=unix, type=CHANNEL, bootOrder=0, specParams={}, address={port=1, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel0, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5device_ebe2ce74-5668-4c44-9099-21f5c8d690cc': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=ebe2ce74-5668-4c44-9099-21f5c8d690cc, device=unix, type=CHANNEL, bootOrder=0, specParams={}, address={port=2, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel1, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850f': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=c5d3d740-1c66-43d9-8f69-bbf70b17850f, device=ide, type=CONTROLLER, bootOrder=0, specParams={}, address={bus=0x00, domain=0x0000, type=pci, slot=0x01, function=0x1}, managed=false, plugged=true, readOnly=false, deviceAlias=ide0, customProperties={}, snapshotId=null}'}, 'smp': '1', 'vmType': 'kvm', 'memSize': 1024, 'smpCoresPerSocket': '1', 'vmName': 'rhel6_64', 'nice': '0', 'smartcardEnable': 'false', 'keyboardLayout': 'en-us', 'kvmEnable': 'true', 'pitReinjection': 'false', 'transparentHugePages': 'true', 'devices': [{'device': 'qxl', 'specParams': {'vram': '32768', 'ram': '65536', 'heads': '1'}, 'type': 'video', 'deviceId': '012a5c68-e3b1-4fe6-8e52-9f19ad944a05', 'address': {'slot': '0x02', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}}, {'index': '2', 'iface': 'ide', 'address': {'bus': '1', 'controller': '0', 'type': 'drive', 'target': '0', 'unit': '0'}, 'specParams': {'path': ''}, 'readonly': 'true', 'deviceId': '68eb044c-5c16-4786-ab47-58b4c8b19f00', 'path': '', 'device': 'cdrom', 'shared': 'false', 'type': 'disk'}, {'index': 0, 'iface': 'virtio', 'format': 'cow', 'bootOrder': '1', 'poolID': '00000002-0002-0002-0002-00000000018a', 'volumeID': 'fa5d06e7-02f8-4cb5-898d-6a4ae5cc6069', 'imageID': 'c12b35df-4a87-42f5-82e6-9de41f27d6e1', 'specParams': {}, 'readonly': 'false', 'domainID': 'ea3ab93d-c3d5-444c-aa54-f044013fb60d', 'optional': 'false', 'deviceId': 'c12b35df-4a87-42f5-82e6-9de41f27d6e1', 'address': {'slot': '0x06', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'disk', 'shared': 'false', 'propagateErrors': 'off', 'type': 'disk'},{'nicModel': 'pv', 'macAddr': '00:1a:4a:a8:d8:6d', 'linkActive': 'true', 'network': 'rhevm', 'filter': 'vdsm-no-mac-spoofing', 'specParams': {}, 'deviceId': '8fda0ce3-b37f-4690-926f-24c09988e6f6', 'address': {'slot': '0x03', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'bridge', 'type': 'interface'}, {'device': 'memballoon', 'specParams': {'model': 'virtio'}, 'type': 'balloon', 'deviceId': '3f558724-9415-4123-9b44-130d0562673c'}, {'index': '0', 'specParams': {}, 'deviceId': '40504d0a-5840-4269-a1b0-11debef211fe', 'address': {'slot': '0x04', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'scsi', 'model': 'virtio-scsi', 'type': 'controller'}], 'maxVCpus': '160', 'spiceSecureChannels': 'smain,sinputs,scursor,splayback,srecord,sdisplay,susbredir,ssmartcard', 'display': 'qxl'}
-
 
         self.do_connect(destHostStart, VDSM_PORT)
         #print cmd

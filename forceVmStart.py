@@ -283,18 +283,16 @@ class vdsmEmergency:
         for fname in dirList:
 
             pathOVF = path + "/" + fname + "/" + fname + ".ovf"
-            cmd['display'] = "vnc"
+            
+            # prepare static fields (same for all vms):
+            cmd['acpiEnable'] = "True"
             cmd['kvmEnable'] = "True"
             cmd['tabletEnable'] = "True"
-            cmd['vmEnable'] = "True"
-            cmd['irqChip'] = "True"
             cmd['nice'] = 0
             cmd['keyboardLayout'] = "en-us"
-            cmd['acpiEnable'] = "True"
-            cmd['tdf'] = "True"
 
             dom = parse(pathOVF)
-
+            
             # Getting vmId field
             i = 0
             attr = 0
@@ -303,17 +301,32 @@ class vdsmEmergency:
                     attr = node.attributes.items()
                     if attr[i][0] == "ovf:id":
                         cmd["vmId"] = attr[i][1]
+                        #print 'vmId: %s' % cmd["vmId"]
                     i = i + 1
 
-            # Getting vmName field
             for node in dom.getElementsByTagName('Content'):
-                # orig code: if node.childNodes[0].firstChild <> None:
-                if node.getElementsByTagName('Name')[0].firstChild <> None:
-                    self.vmName = node.getElementsByTagName('Name')[0].firstChild.nodeValue
-                    cmd['vmName'] = self.vmName
-                    #print 'self.vmName = %s' % self.vmName
+                # Getting vmName field
+                if node.getElementsByTagName('Name'):
+		    if node.getElementsByTagName('Name')[0].firstChild <> None:
+                        self.vmName = node.getElementsByTagName('Name')[0].firstChild.data
+                        cmd['vmName'] = self.vmName
+                        print 'self.vmName = %s' % self.vmName
+                    else:
+                        print 'No vmName attribute for vmId %s, continue to next ovf' % cmd[vmId]
 
+                # Getting display driver:
+                if node.getElementsByTagName('DefaultDisplayType'):
+                    if node.getElementsByTagName('DefaultDisplayType')[0].firstChild <> None:
+                        cmd['display'] = 'qxl' if node.getElementsByTagName('DefaultDisplayType')[0].firstChild.data == '1' else 'vnc'
+                        print cmd['display']
+                else: 
+                    print 'Template has no display value'
+   
+
+
+            import pdb; pdb.set_trace()
             # Getting image and volume
+            # mku this section does not work
             i = 0
             attr = 0
             for node in dom.getElementsByTagName('Disk'):
@@ -408,13 +421,18 @@ class vdsmEmergency:
                             if self.vmName == checkvms[i]:
                                 nrmVms = nrmVms + 1
 				#import pdb; pdb.set_trace()
-                                self.startVM(cmd, destHostStart)
+                                #self.startVM(cmd, destHostStart)
+                                print "Debug mode. Not starting VM. Printing cmd:"
+                                print cmd
                             i += 1
 
         print "Total VMs found: %s" % nrmVms
 
     def startVM(self, cmd, destHostStart):
         """start the VM"""
+
+        #cmd = {'acpiEnable': 'true', 'emulatedMachine': 'rhel6.5.0', 'vmId': '79f4a348-a928-45c4-85c6-b6bfc600d507', 'memGuaranteedSize': 1024, 'spiceSslCipherSuite': 'DEFAULT', 'timeOffset': '0', 'cpuType': 'Penryn', 'custom': {'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5device_ebe2ce74-5668-4c44-9099-21f5c8d690ccdevice_00f0e2b7-5893-45fb-a13e-c3389e6a7dbd': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=00f0e2b7-5893-45fb-a13e-c3389e6a7dbd, device=spicevmc, type=CHANNEL, bootOrder=0, specParams={}, address={port=3, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel2, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eab': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eab, device=virtio-serial, type=CONTROLLER, bootOrder=0, specParams={}, address={bus=0x00, domain=0x0000, type=pci, slot=0x05, function=0x0}, managed=false, plugged=true, readOnly=false, deviceAlias=virtio-serial0, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=ba80ae13-a054-4d4a-9c68-0df32d6540c5, device=unix, type=CHANNEL, bootOrder=0, specParams={}, address={port=1, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel0, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850fdevice_95d5fd25-7bdb-4c90-a0c0-e6e43fcc3eabdevice_ba80ae13-a054-4d4a-9c68-0df32d6540c5device_ebe2ce74-5668-4c44-9099-21f5c8d690cc': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=ebe2ce74-5668-4c44-9099-21f5c8d690cc, device=unix, type=CHANNEL, bootOrder=0, specParams={}, address={port=2, bus=0, controller=0, type=virtio-serial}, managed=false, plugged=true, readOnly=false, deviceAlias=channel1, customProperties={}, snapshotId=null}', 'device_c5d3d740-1c66-43d9-8f69-bbf70b17850f': 'VmDevice {vmId=79f4a348-a928-45c4-85c6-b6bfc600d507, deviceId=c5d3d740-1c66-43d9-8f69-bbf70b17850f, device=ide, type=CONTROLLER, bootOrder=0, specParams={}, address={bus=0x00, domain=0x0000, type=pci, slot=0x01, function=0x1}, managed=false, plugged=true, readOnly=false, deviceAlias=ide0, customProperties={}, snapshotId=null}'}, 'smp': '1', 'vmType': 'kvm', 'memSize': 1024, 'smpCoresPerSocket': '1', 'vmName': 'rhel6_64', 'nice': '0', 'smartcardEnable': 'false', 'keyboardLayout': 'en-us', 'kvmEnable': 'true', 'pitReinjection': 'false', 'transparentHugePages': 'true', 'devices': [{'device': 'qxl', 'specParams': {'vram': '32768', 'ram': '65536', 'heads': '1'}, 'type': 'video', 'deviceId': '012a5c68-e3b1-4fe6-8e52-9f19ad944a05', 'address': {'slot': '0x02', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}}, {'index': '2', 'iface': 'ide', 'address': {'bus': '1', 'controller': '0', 'type': 'drive', 'target': '0', 'unit': '0'}, 'specParams': {'path': ''}, 'readonly': 'true', 'deviceId': '68eb044c-5c16-4786-ab47-58b4c8b19f00', 'path': '', 'device': 'cdrom', 'shared': 'false', 'type': 'disk'}, {'index': 0, 'iface': 'virtio', 'format': 'cow', 'bootOrder': '1', 'poolID': '00000002-0002-0002-0002-00000000018a', 'volumeID': 'fa5d06e7-02f8-4cb5-898d-6a4ae5cc6069', 'imageID': 'c12b35df-4a87-42f5-82e6-9de41f27d6e1', 'specParams': {}, 'readonly': 'false', 'domainID': 'ea3ab93d-c3d5-444c-aa54-f044013fb60d', 'optional': 'false', 'deviceId': 'c12b35df-4a87-42f5-82e6-9de41f27d6e1', 'address': {'slot': '0x06', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'disk', 'shared': 'false', 'propagateErrors': 'off', 'type': 'disk'},{'nicModel': 'pv', 'macAddr': '00:1a:4a:a8:d8:6d', 'linkActive': 'true', 'network': 'rhevm', 'filter': 'vdsm-no-mac-spoofing', 'specParams': {}, 'deviceId': '8fda0ce3-b37f-4690-926f-24c09988e6f6', 'address': {'slot': '0x03', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'bridge', 'type': 'interface'}, {'device': 'memballoon', 'specParams': {'model': 'virtio'}, 'type': 'balloon', 'deviceId': '3f558724-9415-4123-9b44-130d0562673c'}, {'index': '0', 'specParams': {}, 'deviceId': '40504d0a-5840-4269-a1b0-11debef211fe', 'address': {'slot': '0x04', 'bus': '0x00', 'domain': '0x0000', 'type': 'pci', 'function': '0x0'}, 'device': 'scsi', 'model': 'virtio-scsi', 'type': 'controller'}], 'maxVCpus': '160', 'spiceSecureChannels': 'smain,sinputs,scursor,splayback,srecord,sdisplay,susbredir,ssmartcard', 'display': 'qxl'}
+
 
         self.do_connect(destHostStart, VDSM_PORT)
         #print cmd

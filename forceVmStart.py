@@ -250,14 +250,18 @@ class vdsmEmergency:
     def _parseDriveSpec(self, spec):
         if ',' in spec:
             d = {}
+            d['device'] = 'disk'
+            d['type'] = 'disk'
+            d['propagateErrors'] = 'false' # since today this is the only supported option, and it is not in ovf
             for s in spec.split(','):
                 k, v = s.split(':', 1)
                 if k == 'domain': d['domainID'] = v
                 if k == 'pool': d['poolID'] = v
-                if k == 'image': d['imageID'] = v
+                if k == 'image': d['imageID'] = d['deviceId'] = v # would this work at all?
                 if k == 'volume': d['volumeID'] = v
-                if k == 'boot': d['boot'] = v
+                if k == 'boot': d['bootOrder'] = '1' if v else '0'
                 if k == 'format': d['format'] = v
+                if k == 'if': d['iface'] = v
             return d
         return spec
 
@@ -349,6 +353,7 @@ class vdsmEmergency:
             i = 0
             attr = 0
             for node in dom.getElementsByTagName('Disk'):
+#                import pdb; pdb.set_trace()
                 while (i <> len(node.attributes)):
                     attr = node.attributes.items()
                     if attr[i][0] == "ovf:volume-format":
@@ -371,8 +376,8 @@ class vdsmEmergency:
                 ifDisk = "virtio"
             elif ifFormat == "IDE":
                 ifDisk = "ide"
-
-            drives = []
+ 
+            devices = []
             # Getting Drive, bridge, memSize, macAddr, smp, smpCoresPerSocket
             for node in dom.getElementsByTagName('Item'):
 #                import pdb; pdb.set_trace()
@@ -381,11 +386,12 @@ class vdsmEmergency:
 		if volume == node.getElementsByTagName('rasd:InstanceId')[0].firstChild.data:
                     domain = node.getElementsByTagName('rasd:StorageId')[0].firstChild.data 
                     pool = node.getElementsByTagName('rasd:StoragePoolId')[0].firstChild.data
-                    tmp = "pool:" + pool + ",domain:" + domain + ",image:" + image + ",volume:" + volume + ",boot:" + vmBoot + ",format" + vmFormat + ",if:" + ifDisk
+                    tmp = "pool:" + pool + ",domain:" + domain + ",image:" + image + ",volume:" + volume + ",boot:" + vmBoot + ",format:" + vmFormat + ",if:" + ifDisk
                     #param,value = tmp.split("=",1)
-                    drives += [self._parseDriveSpec(tmp)]
-                    cmd['drives'] = drives
-                    print drives
+                    devices += [self._parseDriveSpec(tmp)]
+                    #cmd['devices'] = devices
+                    cmd['drives'] = devices
+                    print devices
                     continue
 
 

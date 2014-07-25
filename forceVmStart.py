@@ -246,25 +246,6 @@ class vdsmEmergency:
                         return vmId
 
 
-
-    def _parseDriveSpec(self, spec):
-        if ',' in spec:
-            d = {}
-            d['device'] = 'disk'
-            d['type'] = 'disk'
-            d['propagateErrors'] = 'false' # since today this is the only supported option, and it is not in ovf
-            for s in spec.split(','):
-                k, v = s.split(':', 1)
-                if k == 'domain': d['domainID'] = v
-                if k == 'pool': d['poolID'] = v
-                if k == 'image': d['imageID'] = d['deviceId'] = v # would this work at all?
-                if k == 'volume': d['volumeID'] = v
-                if k == 'boot': d['bootOrder'] = '1' if v else '0'
-                if k == 'format': d['format'] = v
-                if k == 'if': d['iface'] = v
-            return d
-        return spec
-
     def readXML(self, VmsStotart, destHostStart):
         """read all xml available pointed to Directory path and parse for specific fields"""
 
@@ -315,7 +296,8 @@ class vdsmEmergency:
 		    if node.getElementsByTagName('Name')[0].firstChild <> None:
                         self.vmName = node.getElementsByTagName('Name')[0].firstChild.data
                         cmd['vmName'] = self.vmName
-                        print 'self.vmName = %s' % self.vmName
+			DEBUG = (self.vmName == 'rhel6_64') or (self.vmName == 'rhel7_64') 
+			if DEBUG: print 'self.vmName = %s' % self.vmName
                     else:
                         print 'No vmName attribute for vmId %s, continue to next ovf' % cmd[vmId]
 
@@ -323,79 +305,84 @@ class vdsmEmergency:
                 if node.getElementsByTagName('DefaultDisplayType'):
                     if node.getElementsByTagName('DefaultDisplayType')[0].firstChild <> None:
                         cmd['display'] = 'qxl' if node.getElementsByTagName('DefaultDisplayType')[0].firstChild.data == '1' else 'vnc'
-                        print cmd['display']
+                        if DEBUG: print cmd['display']
                 else: 
                     self.isTmplt = True
-                    print 'Template has no display value'
-   
+                    if DEBUG: print 'Template has no display value'
 
 
-            # Getting image and volume
-            # I do not think it will work for multiple disks here. maybe everything underneath under the for loop
-            i = 0
-            attr = 0
-            for node in dom.getElementsByTagName('Disk'):
-#                import pdb; pdb.set_trace()
-#                i = 0
-                while (i <> len(node.attributes)):
-                    attr = node.attributes.items()
-                    if attr[i][0] == "ovf:fileRef":
-                        storage = attr[i][1]
-                        data = storage.split("/")
-                        image = data[0]
-                        volume = data[1]
-                        print data
-                        break 
-                    i += 1
-
-            # Getting VM format, boot
-            # mku: I do not like this part either:  how do we know we got into same Disk??
-            i = 0
-            attr = 0
-            for node in dom.getElementsByTagName('Disk'):
-#                import pdb; pdb.set_trace()
-                while (i <> len(node.attributes)):
-                    attr = node.attributes.items()
-                    if attr[i][0] == "ovf:volume-format":
-                        format = attr[i][1]
-
-                    if attr[i][0] == "ovf:boot":
-                        vmBoot = attr[i][1]
-
-                    if attr[i][0] == "ovf:disk-interface":
-                        ifFormat = attr[i][1]
-
-                    i += 1
-
-            if format == "COW":
-                vmFormat = ":cow"
-            elif format == "RAW":
-                vmFormat = ":raw"
-
-            if ifFormat == "VirtIO":
-                ifDisk = "virtio"
-            elif ifFormat == "IDE":
-                ifDisk = "ide"
- 
+            # Getting VM disks info
+            # Get only Active Vm snapshots:
             devices = []
-            # Getting Drive, bridge, memSize, macAddr, smp, smpCoresPerSocket
+            volumes = {}
+            for node in dom.getElementsByTagName('File'):
+                attr = node.attributes.items()
+                i = 0
+	        while (i < len(attr)):
+                    if attr[i][0] == "ovf:description":
+                        isLeaf = (attr[i][1]=="Active VM")
+                    # Getting image and volume
+                    if attr[i][0] == "ovf:href":
+                        data = attr[i][1].split("/")
+                        image = data[0]
+                        vol = data[1]
+                        if DEBUG: print data
+                    i += 1
+                if isLeaf: 
+                   volumes[vol] = {}
+                   volumes[vol]['device'] = 'disk'
+                   volumes[vol]['type'] = 'disk'
+                   volumes[vol]['propagateErrors'] = 'off' # since today this is the only supported option, and it is not in ovf
+                   volumes[vol]['imageID'] = volumes[vol]['deviceId'] = image
+                   volumes[vol]['volumeID'] = vol
+			
+                   # Getting Pool and SD values:
+                   for item in dom.getElementsByTagName('Item'):
+                       if vol == item.getElementsByTagName('rasd:InstanceId')[0].firstChild.data:
+                           volumes[vol]['domainID'] = item.getElementsByTagName('rasd:StorageId')[0].firstChild.data
+                           volumes[vol]['poolID'] = item.getElementsByTagName('rasd:StoragePoolId')[0].firstChild.data
+                           break
+                   
+                   # Getting additional attributes:
+                   for disk in dom.getElementsByTagName('Disk'):
+                       d_attr = disk.attributes.items()
+                       j = 0
+                       isMatch = False
+                       while (j < len(d_attr)):
+                           if d_attr[j][0] == "ovf:diskId":
+                               if vol <> d_attr[j][1]:
+                                   break
+                               else:
+                                   isMatch = True
+
+                           if d_attr[j][0] == "ovf:volume-format":
+                               vmFormat = "cow" if d_attr[j][1]=="COW" else "raw"
+
+                           if d_attr[j][0] == "ovf:boot":
+                               vmBoot = '1' if d_attr[j][1] == 'true' else '0'
+
+                           if d_attr[j][0] == "ovf:disk-interface":
+                               ifDisk = "virtio" if d_attr[j][1] == "VirtIO" else "ide"
+      
+                           j += 1
+                           
+                       if isMatch:
+                           if vmBoot == '1': volumes[vol]['bootOrder'] = vmBoot
+                           volumes[vol]['iface'] = ifDisk
+                           volumes[vol]['format'] = vmFormat
+                           break
+
+            if DEBUG: print 'Active Volumes: %s' % volumes
+
+            #import pdb; pdb.set_trace()
+            for dev in volumes: 
+                devices.append(volumes[dev])
+            cmd['devices'] = devices
+            if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
+
+            # Getting bridge, memSize, macAddr, smp, smpCoresPerSocket
             for node in dom.getElementsByTagName('Item'):
 #                import pdb; pdb.set_trace()
-
-                # Getting Drive
-		if volume == node.getElementsByTagName('rasd:InstanceId')[0].firstChild.data:
-                    domain = node.getElementsByTagName('rasd:StorageId')[0].firstChild.data 
-                    pool = node.getElementsByTagName('rasd:StoragePoolId')[0].firstChild.data
-                    tmp = "pool:" + pool + ",domain:" + domain + ",image:" + image + ",volume:" + volume + ",boot:" + vmBoot + ",format:" + vmFormat + ",if:" + ifDisk
-                    #param,value = tmp.split("=",1)
-                    devices += [self._parseDriveSpec(tmp)]
-                    #cmd['devices'] = devices
-                    cmd['drives'] = devices
-                    print devices
-                    continue
-
-
-
                 # Getting bridge
                 nicMod = "pv"
                 if "Ethernet adapter on rhevm" == node.getElementsByTagName('rasd:Caption')[0].firstChild.data:
@@ -409,26 +396,25 @@ class vdsmEmergency:
 
                     cmd['nicModel'] = nicMod
                     cmd['bridge'] = node.getElementsByTagName('rasd:Connection')[0].firstChild.data 
-                    print 'bridge: %s' % cmd['bridge']
+                    if DEBUG: print 'bridge: %s' % cmd['bridge']
                     
                     if not self.isTmplt and node.getElementsByTagName('rasd:MACAddress')[0].firstChild <> None: 
                         cmd['macAddr'] = node.getElementsByTagName('rasd:MACAddress')[0].firstChild.data
-                        print 'macAddr: %s' % cmd['macAddr']
+                        if DEBUG: print 'macAddr: %s' % cmd['macAddr']
 
                 # Getting memSize field
                 str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("MB of memory") > -1:
                     cmd['memSize'] = node.getElementsByTagName('rasd:VirtualQuantity')[0].firstChild.data
-                    print 'memSize: %s' % cmd['memSize']
+                    if DEBUG: print 'memSize: %s' % cmd['memSize']
 
                 # Getting smp and smpCoresPerSocket fields
                 str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("virtual cpu") > -1:
                     cmd["smp"] = node.getElementsByTagName('rasd:num_of_sockets')[0].firstChild.data
                     cmd["smpCoresPerSocket"] = node.getElementsByTagName('rasd:cpu_per_socket')[0].firstChild.data
-                    print 'num_of_socket: %s' %cmd['smp']
-                    print 'core_per_socket: %s' % cmd['smpCoresPerSocket']
-
+                    if DEBUG: print 'num_of_socket: %s' %cmd['smp']
+                    if DEBUG: print 'core_per_socket: %s' % cmd['smpCoresPerSocket']
 
             if not self.isTmplt:
                 # print only vms to start
@@ -440,13 +426,12 @@ class vdsmEmergency:
 
                 i = 0
                 while (i <> len(checkvms)):
-                    print 'current vmName: %s' % self.vmName
-                    print 'checkVms: %s' % checkvms
+                    if DEBUG: print 'current vmName: %s' % self.vmName
+                    if DEBUG: print 'checkVms: %s' % checkvms
                     if self.vmName == checkvms[i]:
                         nrmVms = nrmVms + 1
                         self.startVM(cmd, destHostStart)
-                        print "Debug mode. Not starting VM. Printing cmd:"
-                        print cmd
+                        if DEBUG: print "Printing cmd: %s" % cmd
                         break
                     i += 1
 

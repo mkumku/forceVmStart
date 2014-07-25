@@ -309,7 +309,8 @@ class vdsmEmergency:
                 else: 
                     self.isTmplt = True
                     if DEBUG: print 'Template has no display value'
-
+               
+            if self.isTmplt: continue 
 
             # Getting VM disks info
             # Get only Active Vm snapshots:
@@ -377,31 +378,52 @@ class vdsmEmergency:
             #import pdb; pdb.set_trace()
             for dev in volumes: 
                 devices.append(volumes[dev])
+#            cmd['devices'] = devices
+#            if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
+
+
+            # Getting VM nics info
+            networks = {}
+            for node in dom.getElementsByTagName('Nic'):
+                nic = node.attributes.items()[0][1]
+                print 'nic: %s' % nic
+                #if DEBUG: print 'nic: %s' % nic
+
+                networks[nic] = {} 
+                networks[nic]['device'] = 'bridge'
+                networks[nic]['type'] = 'interface'
+                networks[nic]['deviceId'] = nic
+			
+                for item in dom.getElementsByTagName('Item'):
+                   if nic == item.getElementsByTagName('rasd:InstanceId')[0].firstChild.data:
+                       networks[nic]['macAddr'] = item.getElementsByTagName('rasd:MACAddress')[0].firstChild.data
+                       
+                       networks[nic]['linkActive'] = item.getElementsByTagName('rasd:Linked')[0].firstChild.data
+                       networks[nic]['network'] = item.getElementsByTagName('rasd:Connection')[0].firstChild.data
+                        
+                       nicMod = "pv"
+                       nicSubType = item.getElementsByTagName('rasd:ResourceSubType')[0].firstChild.data
+                       if nicSubType == "3":
+                           nicMod = "pv" #VirtIO
+                       elif nicSubType == "2":
+                           nicMod = "e1000" #e1000
+                       elif nicSubType == "1":
+                           nicMod = "rtl8139" #rtl8139
+
+                       networks[nic]['nicModel'] = nicMod
+                       break
+
+                print 'networks: %s' % networks
+                devices.append(networks[nic])
+            
             cmd['devices'] = devices
             if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
 
-            # Getting bridge, memSize, macAddr, smp, smpCoresPerSocket
+
+            # Getting memSize, macAddr, smp, smpCoresPerSocket
             for node in dom.getElementsByTagName('Item'):
 #                import pdb; pdb.set_trace()
-                # Getting bridge
-                nicMod = "pv"
-                if "Ethernet adapter on rhevm" == node.getElementsByTagName('rasd:Caption')[0].firstChild.data:
-                    nicSubType = node.getElementsByTagName('rasd:ResourceSubType')[0].firstChild.data
-                    if nicSubType == "3":
-                        nicMod = "pv" #VirtIO
-                    elif nicSubType == "2":
-                        nicMod = "e1000" #e1000
-                    elif nicSubType == "1":
-                        nicMod = "rtl8139" #rtl8139
-
-                    cmd['nicModel'] = nicMod
-                    cmd['bridge'] = node.getElementsByTagName('rasd:Connection')[0].firstChild.data 
-                    if DEBUG: print 'bridge: %s' % cmd['bridge']
                     
-                    if not self.isTmplt and node.getElementsByTagName('rasd:MACAddress')[0].firstChild <> None: 
-                        cmd['macAddr'] = node.getElementsByTagName('rasd:MACAddress')[0].firstChild.data
-                        if DEBUG: print 'macAddr: %s' % cmd['macAddr']
-
                 # Getting memSize field
                 str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("MB of memory") > -1:

@@ -58,7 +58,7 @@ VERSION = "1.0.0"
 VDSM_PORT = "54321"
 
 #DEBUG MODE
-DEBUG = "False" # True or False
+DEBUG = False # True or False
 
 #########################################################################
 
@@ -124,25 +124,20 @@ class vdsmEmergency:
         return cfg.data.vars.ssl
 
 
-    def checkVmRunning(self, otherHostsList, VmsToStart):
+    def checkVmRunning(self, otherHostsList):
         """check if the vm's are running"""
-
-        hosts = None
-        vms = None
-        i = 0
-        j = 0
 
         if otherHostsList == None:
             return -1
 
-        if VmsToStart == None:
-            return -1
-
-        vms = VmsToStart.split(",")
+        i = 0
+        hosts = None
         hosts = otherHostsList.split(",")
-
-        # Let's check if all other Hosts are running the VirtualMachine
-        while (i <> len(hosts)):
+        self.upVms = {} # dict by vm_uuid, to hold vmStatus and host
+        
+        # Let's scan all the hosts and make a list of VMs that are running now 
+        # running == appears on vdsClient list output == vmStatus<>Down
+        while (i < len(hosts)):
             ret = VE.do_connect(hosts[i], VDSM_PORT)
             if ret < 0:
                 sys.exit(1)
@@ -152,31 +147,15 @@ class vdsmEmergency:
 
             # Checking VM status
             for s in self.s.getAllVmStats()['statsList']:
-                j = 0
-
-                # print all vms in each host
-                while j < len(vms):
-                    if DEBUG == "True":
-                        print len(vms)
-                        print s['vmId']
-                        print hosts[i]
-                        print vms[j]
-
-                    vmIdCurr = self.getVmId(vms[j])
-
-                    if DEBUG == "True":
-                        print vmIdCurr
-                        print s['vmId']
-
-                    if s['vmId'] == vmIdCurr and s['status'] == "Up":
-                        print "Cannot continue, the VM %s is running in host %s" % (vms[j], hosts[i])
-                        sys.exit(1)
-                    j = j + 1
-
-            # counter for hosts
+                vmId = s['vmId']
+                vmStatus = s['status']
+                
+                self.upVms[vmId]= {}
+                self.upVms[vmId]['status'] = vmStatus
+                self.upVms[vmId]['host'] = hosts[i]
+ 
             i = i + 1
-
-        print "OK, the vm(s) specified are not running on the host(s) informed, continuing.."
+        if DEBUG: print 'Vms found up: %s' % self.upVms 
 
     def checkSPM(self):
         """check if the host which is running this script is the SPM"""
@@ -211,46 +190,13 @@ class vdsmEmergency:
             print "This host is not the current SPM, status [%s]" % self.spmStatus
             sys.exit(1)
 
-    def getVmId(self, vmName):
-        """get the vmId from the vmName used as argument"""
-        path = "/rhev/data-center/%s/mastersd/master/vms" % (self.spUUID)
-
-        # First verify which domainID contain de XML files
-        try:
-            dirList = os.listdir(path)
-        except:
-            print "Cannot locate the dir with ovf files.. aborting!"
-            sys.exit(1)
-
-        #Read all content of xml(s) file(s)
-        for fname in dirList:
-
-            pathOVF = path + "/" + fname + "/" + fname + ".ovf"
-
-            dom = parse(pathOVF)
-
-            # Getting vmId field
-            i = 0
-            attr = 0
-            for node in dom.getElementsByTagName('Section'):
-                while (i < len(node.attributes)):
-                    attr = node.attributes.items()
-                    if attr[i][0] == "ovf:id":
-                        vmId = attr[i][1]
-                    i = i + 1
-
-            # Getting vmName field
-            for node in dom.getElementsByTagName('Content'):
-                if node.childNodes[0].firstChild <> None:
-                    if node.childNodes[0].firstChild.nodeValue == vmName:
-                        return vmId
-
-
-    def readXML(self, VmsStotart, destHostStart):
+    def readXML(self, VmsToStart, destHostStart):
         """read all xml available pointed to Directory path and parse for specific fields"""
 
+        global DEBUG
+
         # number of Vms found
-        nrmVms = 0
+        foundVmsNum = 0
         cmd = {}
         # Path to XML files
         # example default path:
@@ -281,13 +227,14 @@ class vdsmEmergency:
             # Getting vmId field
             i = 0
             attr = 0
-            self.isTmplt = False
+            isTmplt = False
             for node in dom.getElementsByTagName('Section'):
                 while (i < len(node.attributes)):
                     attr = node.attributes.items()
                     if attr[i][0] == "ovf:id":
-                        cmd["vmId"] = attr[i][1]
-                        #print 'vmId: %s' % cmd["vmId"]
+                        self.vmId = attr[i][1]
+                        cmd["vmId"] = self.vmId
+                        #if DEBUG: print 'vmId: %s' % cmd["vmId"]
                     i = i + 1
 
             for node in dom.getElementsByTagName('Content'):
@@ -296,22 +243,31 @@ class vdsmEmergency:
 		    if node.getElementsByTagName('Name')[0].firstChild <> None:
                         self.vmName = node.getElementsByTagName('Name')[0].firstChild.data
                         cmd['vmName'] = self.vmName
-			DEBUG = (self.vmName == 'rhel6_64') or (self.vmName == 'rhel7_64') 
-			if DEBUG: print 'self.vmName = %s' % self.vmName
+			#if DEBUG: DEBUG = (self.vmName == 'rhel6_64') or (self.vmName == 'rhel7_64') 
+			#if DEBUG: print 'self.vmName = %s' % self.vmName
                     else:
                         print 'No vmName attribute for vmId %s, continue to next ovf' % cmd[vmId]
+                 
 
                 # Getting display driver:
                 if node.getElementsByTagName('DefaultDisplayType'):
                     if node.getElementsByTagName('DefaultDisplayType')[0].firstChild <> None:
                         cmd['display'] = 'qxl' if node.getElementsByTagName('DefaultDisplayType')[0].firstChild.data == '1' else 'vnc'
-                        if DEBUG: print cmd['display']
-                else: 
-                    self.isTmplt = True
-                    if DEBUG: print 'Template has no display value'
+                        #if DEBUG: print cmd['display']
+                else:
+                    isTmplt = True
+                    #if DEBUG: print 'Template has no display value'
                
-            if self.isTmplt: continue 
-
+            # check if the vm is in the list and do not parse anymore 
+            if not self.vmName in VmsToStart: 
+                 #if DEBUG: print "Vm %s is not in the list of Vms to Start" % self.vmName
+                 continue                
+            foundVmsNum += 1
+            
+            if isTmplt:
+                print "Vm %s is a template, cannot run template" % self.vmName
+                continue  
+                
             # Getting VM disks info
             # Get only Active Vm snapshots:
             devices = []
@@ -327,7 +283,7 @@ class vdsmEmergency:
                         data = attr[i][1].split("/")
                         image = data[0]
                         vol = data[1]
-                        if DEBUG: print data
+                        #if DEBUG: print 'img/vol: %s' % data
                     i += 1
                 if isLeaf: 
                    volumes[vol] = {}
@@ -373,22 +329,15 @@ class vdsmEmergency:
                            volumes[vol]['format'] = vmFormat
                            break
 
-            if DEBUG: print 'Active Volumes: %s' % volumes
+            #if DEBUG: print 'Active Volumes: %s' % volumes
 
-            #import pdb; pdb.set_trace()
             for dev in volumes: 
                 devices.append(volumes[dev])
-#            cmd['devices'] = devices
-#            if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
-
 
             # Getting VM nics info
             networks = {}
             for node in dom.getElementsByTagName('Nic'):
-                nic = node.attributes.items()[0][1]
-                print 'nic: %s' % nic
-                #if DEBUG: print 'nic: %s' % nic
-
+                nic = node.attributes.items()[0][1]  
                 networks[nic] = {} 
                 networks[nic]['device'] = 'bridge'
                 networks[nic]['type'] = 'interface'
@@ -413,69 +362,61 @@ class vdsmEmergency:
                        networks[nic]['nicModel'] = nicMod
                        break
 
-                print 'networks: %s' % networks
+                #if DEBUG: print 'networks: %s' % networks
                 devices.append(networks[nic])
             
+            # Finally now update cmd with all the devices: disks and networks 
             cmd['devices'] = devices
-            if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
-
+            #if DEBUG: print 'cmd[devices]: %s' % cmd['devices']
 
             # Getting memSize, macAddr, smp, smpCoresPerSocket
             for node in dom.getElementsByTagName('Item'):
-#                import pdb; pdb.set_trace()
                     
                 # Getting memSize field
                 str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("MB of memory") > -1:
                     cmd['memSize'] = node.getElementsByTagName('rasd:VirtualQuantity')[0].firstChild.data
-                    if DEBUG: print 'memSize: %s' % cmd['memSize']
 
                 # Getting smp and smpCoresPerSocket fields
                 str = node.getElementsByTagName('rasd:Caption')[0].firstChild.data
                 if str.find("virtual cpu") > -1:
                     cmd["smp"] = node.getElementsByTagName('rasd:num_of_sockets')[0].firstChild.data
                     cmd["smpCoresPerSocket"] = node.getElementsByTagName('rasd:cpu_per_socket')[0].firstChild.data
-                    if DEBUG: print 'num_of_socket: %s' %cmd['smp']
-                    if DEBUG: print 'core_per_socket: %s' % cmd['smpCoresPerSocket']
 
-            if not self.isTmplt:
-                # print only vms to start
-                try:
-                    checkvms = VmsToStart.split(",")
-                except:
-                    print "Please use , between vms name, avoid space"
-                    self.usage()
+            self.startVM(cmd, destHostStart)
+            if DEBUG: print "Printing cmd: %s" % cmd
+    
+        if DEBUG: print 'Total Vms found: %s' % foundVmsNum   
+        if foundVmsNum == 0:
+            print 'Requested Vms were not found in the system'
+                
+    def checkVmStatus(self):
+        """ Check if current VM is not running already somewhere """
 
-                i = 0
-                while (i <> len(checkvms)):
-                    if DEBUG: print 'current vmName: %s' % self.vmName
-                    if DEBUG: print 'checkVms: %s' % checkvms
-                    if self.vmName == checkvms[i]:
-                        nrmVms = nrmVms + 1
-                        self.startVM(cmd, destHostStart)
-                        if DEBUG: print "Printing cmd: %s" % cmd
-                        break
-                    i += 1
-
-        print "Total VMs found: %s" % nrmVms
+        if self.vmId in self.upVms.keys():
+            print ("Vm %s would not be started! It is in status %s on host %s." % 
+                (self.vmName, self.upVms[self.vmId]['status'], self.upVms[self.vmId]['host']))
+            return 1
+        return 0        
+ 
 
     def startVM(self, cmd, destHostStart):
         """start the VM"""
 
+        ret = self.checkVmStatus()
+        if ret <> 0: return
+
         self.do_connect(destHostStart, VDSM_PORT)
-        #print cmd
-        #cmd1 = dict(cmd)
-        #print cmd1
         ret = self.s.create(cmd)
-        #print ret
-        print "Triggered VM [%s]" % self.vmName
+        print "Triggered VM [%s] start" % self.vmName
 
     def usage(self):
         """shows the program params"""
         print "Usage: " + sys.argv[0] + " [OPTIONS]"
         print "\t--destHost      \t Hypervisor host which will start the VM"
-        print "\t--otherHostsList\t All remaining hosts"
+        print "\t--otherHostsList\t All remaining hosts, if single host in Data Center, use 127.0.0.1"
         print "\t--vms           \t Specify the Names of which VMs to start"
+        print "\t--debug         \t Enable Debug outputs"
         print "\t--version        \t List version release"
         print "\t--help           \t This help menu\n"
 
@@ -490,11 +431,9 @@ if __name__ == "__main__":
     VmsToStart = None
     destHostStart = None
     
-    #import pdb; pdb.set_trace()
-
     VE = vdsmEmergency()
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "Vd:ho:v:", ["destHost=", "otherHostsList=", "vms=", "help", "version"])
+        opts, args = getopt.getopt(sys.argv[1:], "Vd:ho:v:D", ["destHost=", "otherHostsList=", "vms=", "help", "version", "debug"])
     except getopt.GetoptError, err:
         # print help information and exit:
         print(err) # will print something like "option -a not recognized"
@@ -511,6 +450,9 @@ if __name__ == "__main__":
             otherHostsList = a
         elif o in ("-v", "--vms"):
             VmsToStart = a
+        elif o in ("-D", "--debug"):
+            DEBUG = True
+            print 'Debug mode enabled'
         elif o in ("-V", "--version"):
             print VERSION
         else:
@@ -519,11 +461,22 @@ if __name__ == "__main__":
     argc = len(sys.argv)
     if argc < 2:
         VE.usage()
+   
+    if otherHostsList == "":
+        print 'Must provide otherHostsList!'
+        VE.usage()
+     
+    try:
+        VmsToStart = VmsToStart.split(",")
+    except:
+        print "Please use , between vms name, avoid space"
+        VE.usage()
 
     VE.checkSPM()
 
     # Include the destHost to verify
     otherHostsList += ",%s" % destHostStart
-    VE.checkVmRunning(otherHostsList, VmsToStart)
+    VE.checkVmRunning(otherHostsList)
 
+    # Read ovf files and start the vms found
     VE.readXML(VmsToStart, destHostStart)
